@@ -19,8 +19,14 @@ HEADERS += \
 
 #DEFINES += "UNICODE"
 
+win32 {
+CONFIG += embed_manifest_exe
+#QMAKE_LFLAGS_WINDOWS += /MANIFESTUAC:level=\'requireAdministrator\'
+#QMAKE_LFLAGS += /MANIFESTUAC:\"level=\'requireAdministrator\' uiAccess=\'false\'\"
 # Link to Windows OLE libraries
-win32: LIBS += -lole32 -loleaut32
+LIBS += -lole32 -loleaut32
+}
+
 
 
 #message($$QMAKESPEC)

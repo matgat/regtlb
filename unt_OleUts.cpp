@@ -2,6 +2,7 @@
 //#include <exception>
 #include <stdexcept> // 'std::runtime_error'
 //#include <codecvt> // 'std::wstring_convert'
+#include <cctype> // 'std::isspace', 'std::isblank', 'std::isdigit'
 #include <windows.h> // Windows stuff
 #include <objbase.h> // COM stuff,	oleauto.h
 //---------------------------------------------------------------------------
@@ -66,6 +67,74 @@ namespace mat //:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
       return std::string(ws.begin(), ws.end());
      }
 
+
+//---------------------------------------------------------------------------
+// Extract hex or decimal integer from string, given current character
+int ExtractInt( const std::string& s, int& i )
+{
+    int val = 0;
+    int len = s.length();
+    if(i>=len) throw std::runtime_error("No integer, end reached");
+
+    // Detect sign if present
+    int sgn = 1; // sign
+    if( s[i]=='-' )
+       {
+        sgn = -1;
+        ++i;
+        if(i>=len) throw std::runtime_error("No integer, just a minus sign");
+       }
+    else if( s[i]=='+' )
+       {
+        ++i;
+        if(i>=len) throw std::runtime_error("No integer, just a plus sign");
+       }
+
+    // Detect base if present (hexadecimal or octal integer)
+    if( s[i]=='0' )
+       {
+        ++i;
+        if(i>=len) return 0;  // Got a zero
+        // See char after '0'
+        if(s[i]=='x' || s[i]=='X')
+           {// Expecting a hexadecimal integer
+            val = 0;
+            // Get the rest of the hex integer
+            while( ++i<len )
+               {
+                if ( s[i]>='0' && s[i]<='9' ) val = (16*val) + (s[i]-'0');
+                else if ( s[i]>='A' && s[i]<='F' ) val = (16*val) + (s[i]-'A'+10);
+                else if ( s[i]>='a' && s[i]<='f' ) val = (16*val) + (s[i]-'a'+10);
+                else break;
+               }
+           } // '0x'
+        else if( s[i]>='0' && s[i]<='7' )
+           {// Expecting an octal integer
+            val = s[i] - '0';
+            // Get the rest of the octal integer
+            while( ++i<len )
+               {
+                if( s[i]>='0' && s[i]<='7' ) val = (8*val) + (s[i]-'0');
+                else if( s[i]=='8' || s[i]=='9' ) throw std::runtime_error("Invalid octal integer at: " + std::to_string(i) + " (" + s[i] + ")");
+                else break;
+               }
+           } // '0'
+       }
+    else if( s[i]>'0' && s[i]<='9' )
+       {// Expecting a decimal integer
+        val = s[i] - '0';
+        // Get the rest of the decimal integer
+        while( ++i<len )
+           {
+            if( std::isdigit(s[i]) ) val = (10*val) + (s[i]-'0');
+            else break;
+           }
+       }
+    else throw std::runtime_error("Invalid integer at: " + std::to_string(i) + " (" + s[i] + ")");
+    return sgn * val;
+} // 'ExtractInt'
+
+
 } // 'mat' ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 
@@ -126,18 +195,80 @@ namespace nms_Ole //:::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 //---------------------------------------------------------------------------
 // Convert GUID to string
-// ex. {0x01751AD4,0x743E,0x4578,{0x9B,0x56,0x96,0x35,0x1D,0x18,0x6D,0x01}}
+// ex. "{0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}}"
 std::string GUID2String(const GUID& guid)
 {
     std::string s = "{" + mat::ToHex(guid.Data1) + "," +
                           mat::ToHex(guid.Data2) + "," +
                           mat::ToHex(guid.Data3) + ",{";
-    for(int i=0; i<8; ++i) s += mat::ToHex(guid.Data4[i]) + ",";
+    for(int k=0; k<8; ++k) s += mat::ToHex(guid.Data4[k]) + ",";
     s[s.length()-1] = '}';
     s += "}";
     return s;
 } // 'GUID2String'
 
+
+
+//---------------------------------------------------------------------------
+// Convert TLIBATTR to string
+// ex. "{0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}},1,0,0,1"
+std::string Attr2String(const TLIBATTR& a)
+{
+    std::string s = "{" + mat::ToHex(a.guid.Data1) + "," +
+                          mat::ToHex(a.guid.Data2) + "," +
+                          mat::ToHex(a.guid.Data3) + ",{";
+    for(int k=0; k<8; ++k) s += mat::ToHex(a.guid.Data4[k]) + ",";
+    s[s.length()-1] = '}';
+    s += "}";
+    s += "," + std::to_string(a.wMajorVerNum) + "," + std::to_string(a.wMinorVerNum);
+    s += "," + std::to_string(a.lcid);
+    s += "," + std::to_string(a.syskind);
+    return s;
+} // 'Attr2String'
+
+
+
+//---------------------------------------------------------------------------
+// Convert string to TLIBATTR
+// "{0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}},1,0,0,1"
+TLIBATTR String2Attr( const std::string& s )
+{
+    TLIBATTR a;
+    int i=0, len=s.length();
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (empty)");
+    if(s[i++]!='{') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.guid.Data1 = mat::ExtractInt(s,i);
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.guid.Data2 = mat::ExtractInt(s,i);
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.guid.Data3 = mat::ExtractInt(s,i);
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated Data3)");
+    if(s[i++]!='{') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    for(int k=0; k<8; ++k)
+       {
+        a.guid.Data4[k] = mat::ExtractInt(s,i);
+        if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated in Data4)");
+        else if(k<7 && s[i]!=',') throw std::runtime_error("Invalid TLIBATTR (truncated)");
+        else if(k==7 && s[i]!='}') throw std::runtime_error("Invalid TLIBATTR (truncated)");
+        ++i;
+       }
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated)");
+    if(s[i++]!='}') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated after guid)");
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.wMajorVerNum = mat::ExtractInt(s,i);
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated at wMajorVerNum)");
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.wMinorVerNum = mat::ExtractInt(s,i);
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated at wMinorVerNum)");
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.lcid = mat::ExtractInt(s,i);
+    if(i>=len) throw std::runtime_error("Invalid TLIBATTR (truncated at lcid)");
+    if(s[i++]!=',') throw std::runtime_error("Invalid TLIBATTR at: " + std::to_string(i) + " (" + s[i] + ")");
+    a.syskind = static_cast<SYSKIND>( mat::ExtractInt(s,i) );
+    return a;
+} // 'String2Attr'
 
 
 //---------------------------------------------------------------------------
@@ -192,19 +323,15 @@ std::string HResult2String(const HRESULT hr)
 // Constructor
 cls_TLBfile::cls_TLBfile(const std::string& pth) : pTlb(nullptr), pTlbAttr(nullptr)
 {
+    i_Path = mat::Convert(pth); // Store the path
+
     HRESULT hr = ::CoInitialize(NULL); // Init COM stuff (single threaded)
     //hr = ::CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);  // COINIT_MULTITHREADED
     if( FAILED(hr) ) throw std::runtime_error("Cannot initialize COM: " + HResult2String(hr));
 
     // Try to load the type library
     try { Load(); }
-    catch(std::exception& e)
-       {
-        ::CoUninitialize(); // Uninitialize COM stuff
-        throw;
-       }
-
-    i_Path = mat::Convert(pth); // Store the path
+    catch(std::exception& e) { ::CoUninitialize(); throw; }  // Uninitialize COM stuff and rethrow
 }
 
 //---------------------------------------------------------------------------
@@ -311,11 +438,20 @@ std::wstring cls_TLBfile::QueryPath()
 
 //---------------------------------------------------------------------------
 // Retrieves the path of an already registered type library
-// std::string pth = cls_TLBfile::FindTLBPath("{0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}},1,0,0");
+// std::string pth = cls_TLBfile::FindTLBPath("{0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}},1,0,0,1");
+// Query tlb path by attributes <GUID,MajorVer,MinorVer,lcid,syskind>
+//const GUID TLB_GUID = {0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}};
+//const WORD TLB_MajorVerNum = 1;
+//const WORD TLB_MinorVerNum = 0;
+//const DWORD TLB_lcid = 0;
+//const SYSKIND TLB_syskind = SYS_WIN32; // SYS_WIN16:0,SYS_WIN32:1,SYS_MAC:2,SYS_WIN64:3
+//std::string s = ole::cls_TLBfile::FindTLBPath(TLB_GUID,
+//                                              TLB_MajorVerNum,
+//                                              TLB_MinorVerNum,
+//                                              TLB_lcid);
 std::string cls_TLBfile::FindPath(const std::string& s)
 {
-    TLIBATTR a;
-    // TODO: parse string
+    TLIBATTR a = String2Attr(s);
     BSTR bstr;
     ::QueryPathOfRegTypeLib(a.guid,a.wMajorVerNum,a.wMinorVerNum,a.lcid,&bstr);
     std::wstring wpth = cls_BSTR::Convert(bstr);
@@ -323,21 +459,6 @@ std::string cls_TLBfile::FindPath(const std::string& s)
     return mat::Convert(wpth);
 } // 'FindPath'
 
-
-
-    //
-    //(query tlb path by attributes <GUID,MajorVer,MinorVer,lcid,syskind>
-
-
-    //const GUID TLB_GUID = {0x714D710F,0x27B7,0x42BA,{0xA5,0x88,0x91,0xAD,0xC7,0xFF,0x4B,0x47}};
-    //const WORD TLB_MajorVerNum = 1;
-    //const WORD TLB_MinorVerNum = 0;
-    //const DWORD TLB_lcid = 0;
-    //const SYSKIND TLB_syskind = SYS_WIN32; // SYS_WIN16:0,SYS_WIN32:1,SYS_MAC:2,SYS_WIN64:3
-    //api8070RegPth = mat::cls_TLBfile::FindTLBPath(cnc8070::TLB_GUID,
-    //                                              cnc8070::TLB_MajorVerNum,
-    //                                              cnc8070::TLB_MinorVerNum,
-    //                                              cnc8070::TLB_lcid);
 
 
 } // 'nms_Ole' ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
