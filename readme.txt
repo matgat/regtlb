@@ -9,8 +9,10 @@
   /---------------------------------------------------\
     Versioning
   \---------------------------------------------------/
-   Hg repository is in:
-   https://matgat@bitbucket.org/matgat/regtlb
+   Hg repository was in:
+   https://bitbucket.org/matgat/regtlb
+   Git repository is in:
+   https://github.com/matgat/regtlb.git
 
 
   /---------------------------------------------------\
